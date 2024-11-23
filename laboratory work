@@ -1,0 +1,203 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace laba_5
+{
+    class CubicSpline
+    {
+        SplineTuple[] splines; // Сплайн
+
+        // Структура, описывающая сплайн на каждом сегменте сетки
+        struct SplineTuple
+        {
+            public double a, b, c, d, x;
+        }
+
+        // Построение сплайна
+        // x - узлы сетки, должны быть упорядочены по возрастанию, кратные узлы запрещены
+        // y - значения функции в узлах сетки
+        // n - количество узлов сетки
+        public void BuildSpline(double[] x, double[] y)
+        {
+            int n = x.GetLength(0);
+            // Инициализация массива сплайнов
+            splines = new SplineTuple[n];
+            for (int i = 0; i < n; ++i)
+            {
+                splines[i].x = x[i];
+                splines[i].a = y[i];
+            }
+            splines[0].c = splines[n - 1].c = 0.0;
+
+            // Решение СЛАУ относительно коэффициентов сплайнов c[i] методом прогонки для трехдиагональных матриц
+            // Вычисление прогоночных коэффициентов - прямой ход метода прогонки
+            double[] alpha = new double[n - 1];
+            double[] beta = new double[n - 1];
+            alpha[0] = beta[0] = 0.0;
+            for (int i = 1; i < n - 1; ++i)
+            {
+                double h_i = x[i] - x[i - 1], h_i1 = x[i + 1] - x[i];
+                double A = h_i;
+                double C = 2.0 * (h_i + h_i1);
+                double B = h_i1;
+                double F = 6.0 * ((y[i + 1] - y[i]) / h_i1 - (y[i] - y[i - 1]) / h_i);
+                double z = (A * alpha[i - 1] + C);
+                alpha[i] = -B / z;
+                beta[i] = (F - A * beta[i - 1]) / z;
+            }
+
+            // Нахождение решения - обратный ход метода прогонки
+            for (int i = n - 2; i > 0; --i)
+                splines[i].c = alpha[i] * splines[i + 1].c + beta[i];
+
+            // Освобождение памяти, занимаемой прогоночными коэффициентами
+            beta = null;
+            alpha = null;
+
+            // По известным коэффициентам c[i] находим значения b[i] и d[i]
+            for (int i = n - 1; i > 0; --i)
+            {
+                double h_i = x[i] - x[i - 1];
+                splines[i].d = (splines[i].c - splines[i - 1].c) / h_i;
+                splines[i].b = h_i * (2.0 * splines[i].c + splines[i - 1].c) / 6.0 + (y[i] - y[i - 1]) / h_i;
+            }
+        }
+
+        // Вычисление значения интерполированной функции в произвольной точке
+        public double Func(double x)
+        {
+            if (splines == null)
+                return double.NaN; // Если сплайны ещё не построены - возвращаем NaN
+
+            int n = splines.Length;
+            SplineTuple s;
+
+            if (x <= splines[0].x) // Если x меньше точки сетки x[0] - пользуемся первым эл-тов массива
+                s = splines[1];
+            else if (x >= splines[n - 1].x) // Если x больше точки сетки x[n - 1] - пользуемся последним эл-том массива
+                s = splines[n - 1];
+            else // Иначе x лежит между граничными точками сетки - производим бинарный поиск нужного эл-та массива
+            {
+                int i = 0, j = n - 1;
+                while (i + 1 < j)
+                {
+                    int k = i + (j - i) / 2;
+                    if (x <= splines[k].x)
+                        j = k;
+                    else
+                        i = k;
+                }
+                s = splines[j];
+            }
+
+            double dx = (x - s.x);
+            // Вычисляем значение сплайна в заданной точке по схеме Горнера (в принципе, "умный" компилятор применил бы схему Горнера сам, но ведь не все так умны, как кажутся)
+            return s.a + (s.b + (s.c / 2.0 + s.d * dx / 6.0) * dx) * dx;
+        }
+    }
+
+    class Lagrandg
+    {
+        public static double Li(double[] x, double provx, int i)
+        {
+            int n = x.GetLength(0);
+            double L;
+            double Chesl = 1;
+            double Znam = 1;
+            // вычисление числителя
+            for (int k = 0; k != n; k++)
+            {
+                if (k == i) continue;
+                // убираем множитель x - x(i)
+                Chesl *= provx - x[k];
+            }
+            // вычисление знаменателя
+            for (int k = 0; k != n; k++)
+            {
+                if (x[i] == x[k]) continue;
+                // убираем, а то ноль в знаменателе
+                Znam *= x[i] - x[k];
+            }
+            L = Chesl / Znam;
+            return L;
+        }
+    }
+
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            double[] x = { 0.91, 1.2, 2.3, 3.5, 4.7, 5.1, 6.8, 7.1, 7.7, 9 };
+            double[] y = { 2.20230, 2.53968, 2.10793, 0.70414, 0.36791, 0.39621, 1.63904, 2.07294, 2.68631, 1.51001 };
+            double[,] row = new double[26, 3];
+          
+            CubicSpline cb = new CubicSpline();
+            cb.BuildSpline(x, y);
+            for (int i = 0; i < row.GetLength(0); i++)
+            {
+                row[i, 0] = Math.Exp((Math.Sin(1 + 0.32 * i)));
+
+                row[i, 1] = cb.Func(1 + 0.32 * i);
+
+                double Rv = 0;  // начальное значение                   
+                double arg = 1 + 0.32 * i;
+                for (int k = 0; k != x.GetLength(0); k++)
+                {
+                    double Lv = Lagrandg.Li(x, arg, k);
+                    Rv += Lv * y[k];
+                }
+                row[i, 2] = Rv;
+            }
+
+            Console.WriteLine("f(f1-за формулою, f2-кубічна апроксимація, f3-апроксимація Лагрнджом)");
+            Console.WriteLine("--------------------------------");
+            Console.WriteLine("|  x   | f1(x) | f2(x) | f3(x) |");
+            Console.WriteLine("--------------------------------");
+            for (int i = 0; i < row.GetLength(0); i++)
+            {
+                Console.WriteLine("| {0,4:F2} | {1,5:F3} | {2,5:F3} | {3,5:F3} |", (1 + 0.32 * i), row[i, 0], row[i, 1], row[i, 2]);
+            }
+            Console.WriteLine("--------------------------------");
+
+
+            row = new double[26, 4];
+            for (int i = 0; i < row.GetLength(0); i++)
+            {
+                row[i, 0] = Math.Exp((Math.Sin(1 + 0.32 * i))) * Math.Cos((1 + 0.32 * i));
+                row[i, 2] = (Math.Exp((Math.Sin(1 + 0.32 * i))) * Math.Cos(1 + 0.32 * i) * Math.Cos(1 + 0.32 * i)) - (Math.Exp((Math.Sin(1 + 0.32 * i))) * Math.Sin(1 + 0.32 * i));
+
+                double value = (1 + 0.32 * i);
+                double dx;
+                if (value < x[0]) // Если x меньше точки сетки x[0] - пользуемся первым эл-тов массива
+                    dx = x[0] - value;
+                else if (value > x[x.GetLength(0) - 1]) // Если x больше точки сетки x[n - 1] - пользуемся последним эл-том массива
+                    dx = value - x[x.GetLength(0) - 1];
+                else // Иначе x лежит между граничными точками сетки - производим поиск нужного эл-та массива
+                {
+                    int k=0;
+                    while ((value > x[k+1])&&(k<x.GetLength(0)-1)) k++;
+                    dx = value - x[k];
+                }
+                dx = Math.Abs(dx);
+
+                row[i, 1] = (cb.Func(value + dx) - cb.Func(value - dx)) / (2* dx);
+                row[i, 3] = (cb.Func(value + dx) - (2 * cb.Func(value)) + cb.Func(value - dx)) / (dx * dx);
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("f'/f''(f1-за формулою, f2-чисельне диф.)");
+            Console.WriteLine("------------------------------------------------");
+            Console.WriteLine("|  x   |  f1'(x) |  f2'(x) | f1''(x) | f2''(x) |");
+            Console.WriteLine("------------------------------------------------");
+            for (int i = 0; i < row.GetLength(0); i++)
+            {
+                Console.WriteLine("| {0,4:F2} | {1,7:F3} | {2,7:F3} | {3,7:F3} | {4,7:F3} |", (1 + 0.32 * i), row[i, 0], row[i, 1], row[i, 2], row[i, 3]);
+            }
+            Console.WriteLine("------------------------------------------------");
+
+            Console.ReadLine();
+        }
+    }
+}
